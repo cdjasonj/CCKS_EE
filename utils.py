@@ -7,9 +7,12 @@ from tqdm import tqdm
 maxlen = 180
 embedding_size = 300
 #bert_path
-config_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_config.json'
-checkpoint_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_model.ckpt'
-dict_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/vocab.txt'
+# config_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_config.json'
+# checkpoint_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_model.ckpt'
+# dict_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/vocab.txt'
+config_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_H-768_A-12/bert_config.json'
+checkpoint_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_H-768_A-12/bert_model.ckpt'
+dict_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_H-768_A-12/vocab.txt'
 
 def seq_padding(X):
     # L = [len(x) for x in X]
