@@ -207,11 +207,11 @@ def save_result(data,entities,mode):
                 dic = {}
                 id = data[index]['id']
                 text = data[index]['text']
+                event_type = data[index]['event_type']
                 entity = entities[index]
-                event_type = entities['event_type']
                 dic['id'] = id
-                dic['entity'] = entity
                 dic['text'] = text
+                dic['entity'] = entity
                 dic['event_type'] = event_type
                 dev_result.append(dic)
             with codecs.open(dev_result_path, 'w', encoding='utf-8') as f:
@@ -225,13 +225,13 @@ def predict_test_batch(mode):
         test_BERT_INPUT0, test_BERT_INPUT1 = load_data(test_data,'test')
         bio_pred =entity_model.predict([test_BERT_INPUT0, test_BERT_INPUT1],batch_size=1000,verbose=1) #[batch_size,sentence,num_classes]
         entites = extract_entity(bio_pred,test_data)
-        save_result(test_data,entites)
+        save_result(test_data,entites,'test')
     else:
         #对dev进行测评
         dev_BERT_INPUT0, dev_BERT_INPUT1,_ = load_data(dev_data,'dev')
         bio_pred =entity_model.predict([dev_BERT_INPUT0, dev_BERT_INPUT1],batch_size=1000,verbose=1) #[batch_size,sentence,num_classes]
         entites = extract_entity(bio_pred,dev_data)
-        save_result(dev_data,entites)
+        save_result(dev_data,entites,'dev')
         return comput_f1(entites)
 
 def scheduler(epoch):
