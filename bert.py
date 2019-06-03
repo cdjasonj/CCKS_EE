@@ -30,7 +30,7 @@ char2id_path = 'inputs/all_chars_me.json'
 #output_path
 weight_name=  'models/baseline_bert_6_3.weights'
 test_result_path = 'output/result_A.txt'
-dev_result_path='output/result_dev.txt' #dev_result用来做数据分析
+dev_result_path='output/result_dev.json' #dev_result用来做数据分析
 
 id2char,char2id = json.load(open(char2id_path,encoding='utf-8'))
 event2id = json.load(open(event2id_path,encoding='utf-8'))
@@ -138,7 +138,6 @@ def extract_entity(bio_pred,data):
                     break
                 else:
                     entity = text[i]
-                    flag = 1
                     for j in range(i+1,len(bio)):
                         if j >= len(text): #预测出的结构在文本范围外
                             entities.append(entity)
@@ -164,13 +163,9 @@ def comput_f1(entities):
     :param dev_file:
     :return:
     """
-    # import ipdb
-    # ipdb.set_trace()
     right = 1e-10
     pred = 1e-10
     true = 1e-10
-    import ipdb
-    ipdb.set_trace()
     for idx in range(len(dev_data)):
         pred_entity = entities[idx]
         true_entity = dev_data[idx]['entity']
@@ -228,6 +223,8 @@ def predict_test_batch(mode):
         save_result(test_data,entites,'test')
     else:
         #对dev进行测评
+        # weight_file = weight_name
+        # train_model.load_weights(weight_file)
         dev_BERT_INPUT0, dev_BERT_INPUT1,_ = load_data(dev_data,'dev')
         bio_pred =entity_model.predict([dev_BERT_INPUT0, dev_BERT_INPUT1],batch_size=1000,verbose=1) #[batch_size,sentence,num_classes]
         entites = extract_entity(bio_pred,dev_data)
