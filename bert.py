@@ -121,6 +121,8 @@ def build_model_from_config(config_file,
     return train_model,entity_model
 
 def extract_entity(bio_pred,data):
+    #目前抽取规则变成了， 抽取出预测的所有可能的BIO，然后把文本长度最长的bio当作抽取目标
+    #这样做的目的是，有些文本被预测成了单个B，这样明显是错误的。
     entities=[]
     text_in = []
     for _data in data:
@@ -132,6 +134,7 @@ def extract_entity(bio_pred,data):
         text = text_in[idx]
         bio = bio_pred[idx]
         flag = 0
+        temps = []  # 保存所有可能被抽取出来的实体。 选择长度最长的哪一个当作预测目标
         for i in range(len(bio)):
             if bio[i] == 1: #找到B标识符1
                 if i >= len(text): #预测出的1在文本范围外，来自pad的部分
@@ -146,10 +149,17 @@ def extract_entity(bio_pred,data):
                             if bio[j] == 2: #找到I标志符2
                                 entity+=text[j]
                             else:
-                                flag = 1
-                                entities.append(entity)
+                                temps.append(entity)
                                 break
-                    break
+        maxlen = 0
+        _entity = ''
+        for entity in temps:
+            if len(entity) > maxlen:
+                maxlen = len(entity)
+                _entity = entity
+        if _entity: #如果有抽取出来的目标，就append,
+            entities.append(_entity)
+            flag = 1
         if flag == 0:#没有预测出来补个空
             entities.append('')
     return entities
@@ -214,7 +224,6 @@ def save_result(data,entities,mode):
 
 def predict_test_batch(mode):
     if mode == 'test':
-        pass
         weight_file = weight_name
         train_model.load_weights(weight_file)
         test_BERT_INPUT0, test_BERT_INPUT1 = load_data(test_data,'test')
@@ -249,7 +258,7 @@ train_model,entity_model = build_model_from_config(config_path, checkpoint_path,
 train_D = data_generator(train_data,32)
 reduce_lr = LearningRateScheduler(scheduler, verbose=1)
 best_f1 = 0
-for i in range(1,10):
+for i in range(1,15):
     train_model.fit_generator(train_D.__iter__(),
                               steps_per_epoch=len(train_D),
                               epochs=1,
@@ -259,6 +268,7 @@ for i in range(1,10):
     print('进入到这里了哟~')
     P, R, F = predict_test_batch('dev')
     if F > best_f1 :
+        best_f1 = F
         train_model.save_weights(weight_name)
         print('当前第{}个epoch，准确度为{},召回为{},f1为：{}'.format(i,P,R,F))
 predict_test_batch('test')
