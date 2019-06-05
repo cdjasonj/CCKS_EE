@@ -11,14 +11,17 @@ from keras.callbacks import Callback
 from random import choice, sample
 from keras_bert import get_model, load_model_weights_from_checkpoint
 from tqdm import tqdm
-from layers import Gate_Add_Lyaer,MaskedConv1D,MaskFlatten,MaskPermute,MaskRepeatVector
+from layers import Gate_Add_Lyaer,MaskedConv1D,MaskFlatten,MaskPermute,MaskRepeatVector,seq_and_vec
 from utils import load_data,data_generator
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 #bert path
-config_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_config.json'
-checkpoint_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_model.ckpt'
-dict_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/vocab.txt'
+# config_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_config.json'
+# checkpoint_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/bert_model.ckpt'
+# dict_path = '/home/ccit22/m_minbo/chinese_L-12_H-768_A-12/vocab.txt'
+config_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_H-768_A-12/bert_config.json'
+checkpoint_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_H-768_A-12/bert_model.ckpt'
+dict_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_H-768_A-12/vocab.txt'
 #input_path
 train_data_path = 'inputs/train_data_me.json'
 dev_data_path = 'inputs/dev_data_me.json'
@@ -90,6 +93,7 @@ def build_model_from_config(config_file,
 
     mask = Lambda(lambda x: K.cast(K.greater(K.expand_dims(x, 2), 0), 'float32'))(inputs[0])
 
+    outputs = Dropout(0.25)(outputs)
     attention = TimeDistributed(Dense(1, activation='tanh'))(outputs)
     attention = MaskFlatten()(attention)
     attention = Activation('softmax')(attention)
@@ -97,13 +101,15 @@ def build_model_from_config(config_file,
     attention = MaskPermute([2, 1])(attention)
     sent_representation = multiply([outputs, attention])
     attention = Lambda(lambda xin: K.sum(xin, axis=1))(sent_representation)
-    # lstm_attention = Lambda(seq_and_vec, output_shape=(None, self.hidden_size * 2))(
+    t_dim = K.int_shape(outputs)[-1]
+    bert_attention = Lambda(seq_and_vec, output_shape=(None, t_dim * 2))([outputs,attention])
     #     [lstm, attention])  # [这里考虑下用相加的方法，以及门控相加]
-    attention = MaskRepeatVector(maxlen)(attention)  # [batch,sentence,hidden_size]
-    gate_attention = Gate_Add_Lyaer()([outputs, attention])
-    gate_attention = Dropout(0.15)(gate_attention)
+    # attention = MaskRepeatVector(maxlen)(attention)  # [batch,sentence,hidden_size]
 
-    cnn1 = MaskedConv1D(filters=hidden_size, kernel_size=3, activation='relu', padding='same')(gate_attention)
+    # gate_attention = Gate_Add_Lyaer()([outputs, attention])
+    # gate_attention = Dropout(0.15)(gate_attention)
+
+    cnn1 = MaskedConv1D(filters=hidden_size, kernel_size=3, activation='relu', padding='same')(bert_attention)
     #BIOE
     bio_pred = Dense(4, activation='softmax')(cnn1)
 
@@ -181,14 +187,17 @@ def comput_f1(entities):
         pred_entity = entities[idx]
         true_entity = dev_data[idx]['entity']
         true += 1
-        if pred_entity:
-            pred+= 1
-            if pred_entity == true_entity:
-                right+=1
-    P = right/pred
-    R = right / true
-    F = 2*P*R/(R+P)
-    return P,R,F
+        if pred_entity == true_entity:
+            right += 1
+        # if pred_entity:
+        #     pred+= 1
+        #     if pred_entity == true_entity:
+        #         right+=1
+    # P = right/pred
+    # R = right / true
+    # F = 2*P*R/(R+P)
+    ACC = right/len(dev_data)
+    return ACC
 
 def save_result(data,entities,mode):
     """
@@ -279,8 +288,8 @@ def scheduler(epoch):
 train_model,entity_model = build_model_from_config(config_path, checkpoint_path, seq_len=180)
 train_D = data_generator(train_data,26)
 reduce_lr = LearningRateScheduler(scheduler, verbose=1)
-best_f1 = 0
-for i in range(1,15):
+best_acc = 0
+for i in range(1,10):
     train_model.fit_generator(train_D.__iter__(),
                               steps_per_epoch=len(train_D),
                               epochs=1,
@@ -288,9 +297,9 @@ for i in range(1,15):
                               )
     # if (i) % 2 == 0 : #两次对dev进行一次测评,并对dev结果进行保存
     # print('进入到这里了哟~')
-    P, R, F = predict_test_batch('dev')
-    if F > best_f1 :
-        best_f1 = F
+    acc= predict_test_batch('dev')
+    if acc > best_acc :
+        best_acc = acc
         train_model.save_weights(weight_name)
-        print('当前第{}个epoch，准确度为{},召回为{},f1为：{}'.format(i,P,R,F))
+        print('当前第{}个epoch，acc为{}}'.format(i,best_acc))
 predict_test_batch('test')
