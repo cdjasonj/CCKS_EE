@@ -17,9 +17,8 @@ from keras_bert import get_model, load_model_weights_from_checkpoint
 from tqdm import tqdm
 from layers import Gate_Add_Lyaer,MaskedConv1D,MaskFlatten,MaskPermute,MaskRepeatVector,seq_and_vec
 from utils import load_data,data_generator
-from split_dev_data import clean_train_data,split_dev
+from split_dev_data import clean_train_data,split_dev,bagging_split_data
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-from keras.utils import multi_gpu_model
 
 #bert path
 config_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_H-768_A-12/bert_config.json'
@@ -105,8 +104,10 @@ def build_model_from_config(config_file,
     )
     inputs, outputs = model
     bio_label = Input(shape=(maxlen,))
+    event = Input(shape=(1,))
 
     mask = Lambda(lambda x: K.cast(K.greater(K.expand_dims(x, 2), 0), 'float32'))(inputs[0])
+    event_embedding = Embedding(len(event2id),hidden_size,mask_zero=True)(event)
 
     outputs = Dropout(0.15)(outputs)
     attention = TimeDistributed(Dense(1, activation='tanh'))(outputs)
@@ -118,18 +119,15 @@ def build_model_from_config(config_file,
     attention = Lambda(lambda xin: K.sum(xin, axis=1))(sent_representation)
     t_dim = K.int_shape(outputs)[-1]
     bert_attention = Lambda(seq_and_vec, output_shape=(None, t_dim * 2))([outputs,attention])
-    #     [lstm, attention])  # [这里考虑下用相加的方法，以及门控相加]
-    # attention = MaskRepeatVector(maxlen)(attention)  # [batch,sentence,hidden_size]
-
-    # gate_attention = Gate_Add_Lyaer()([outputs, attention])
-    # gate_attention = Dropout(0.15)(gate_attention)
 
     cnn1 = MaskedConv1D(filters=hidden_size, kernel_size=3, activation='relu', padding='same')(bert_attention)
+    event_bc = Lambda(lambda input: input[0] * 0 + input[1])([cnn1, event_embedding])
+    con_cnn_event = Concatenate(axis=-1)([cnn1,event_bc])
+    dens1 = Dense(hidden_size,activation='relu',use_bias=True)(con_cnn_event)
     #BIOE
-    bio_pred = Dense(4, activation='softmax')(cnn1)
-
-    entity_model = keras.models.Model([inputs[0], inputs[1]], [bio_pred])  # 预测subject的模型
-    train_model = keras.models.Model([inputs[0], inputs[1],bio_label],[bio_pred])
+    bio_pred = Dense(4, activation='softmax')(dens1)
+    entity_model = keras.models.Model([inputs[0], inputs[1],event], [bio_pred])  # 预测subject的模型
+    train_model = keras.models.Model([inputs[0], inputs[1],bio_label,event],[bio_pred])
 
     loss = K.sparse_categorical_crossentropy(bio_label, bio_pred)
     loss = K.sum(loss * mask[:, :, 0]) / K.sum(mask)
@@ -245,40 +243,20 @@ def save_result(data,entities,mode):
             with codecs.open(dev_result_path, 'w', encoding='utf-8') as f:
                 json.dump(dev_result, f, indent=4, ensure_ascii=False)
 
-# def save_bio_pred(bio_pred,data,entities):
-#     """
-#     将bio_pred保存输出，看下抽取规则有没有地方可以改进
-#     :param bio_pred:
-#     :return:
-#     """
-#     bio_pred = np.argmax(bio_pred) #[batch,sentence]
-#     dev_bio_result = []
-#
-#     for index in range(len(data)):
-#         dic = {}
-#         dic['id'] = data[index]['id']
-#         dic['text'] = data[index]['text']
-#         dic['event_type'] = data[index]['event_type']
-#         dic['entities'] = entities[index]
-#         dic['bio_pred'] = bio_pred[index]
-#         dev_bio_result.append(dic)
-#     with codecs.open(dev_bio_result_path, 'w', encoding='utf-8') as f:
-#         json.dump(dev_bio_result, f, indent=4, ensure_ascii=False)
-
 def predict_test_batch(mode):
     if mode == 'test':
         weight_file = weight_name
         train_model.load_weights(weight_file)
-        test_BERT_INPUT0, test_BERT_INPUT1 = load_data(test_data,'test')
-        bio_pred =entity_model.predict([test_BERT_INPUT0, test_BERT_INPUT1],batch_size=1000,verbose=1) #[batch_size,sentence,num_classes]
+        test_BERT_INPUT0, test_BERT_INPUT1,EVENT = load_data(test_data,event2id,'test')
+        bio_pred =entity_model.predict([test_BERT_INPUT0, test_BERT_INPUT1,EVENT],batch_size=1000,verbose=1) #[batch_size,sentence,num_classes]
         entites = extract_entity(bio_pred,test_data)
         save_result(test_data,entites,'test')
     else:
         #对dev进行测评
         # weight_file = weight_name
         # train_model.load_weights(weight_file)
-        dev_BERT_INPUT0, dev_BERT_INPUT1,_ = load_data(dev_data_bagging,'dev')
-        bio_pred =entity_model.predict([dev_BERT_INPUT0, dev_BERT_INPUT1],batch_size=1000,verbose=1) #[batch_size,sentence,num_classes]
+        dev_BERT_INPUT0, dev_BERT_INPUT1,_,EVENT = load_data(dev_data_bagging,event2id,'dev')
+        bio_pred =entity_model.predict([dev_BERT_INPUT0, dev_BERT_INPUT1,EVENT],batch_size=1000,verbose=1) #[batch_size,sentence,num_classes]
         entites = extract_entity(bio_pred,dev_data_bagging)
         save_result(dev_data_bagging,entites,'dev') #dev的entity预测结果
         # save_bio_pred(bio_pred,dev_data_bagging,entites) #dev的bio预测结果
@@ -299,16 +277,16 @@ def scheduler(epoch):
             return lr
 ####################################################################################################################
 train_data = clean_train_data(train_data)  # 清除train_data中 类别为’其他的‘样本
-for i in range(5):
+for i in range(10):
     train_model, entity_model = build_model_from_config(config_path, checkpoint_path, seq_len=180)
     best_f1 = 0
     print('当前是第{}个bagging'.format(i))
-    train_data_bagging,dev_data_bagging = split_dev(train_data)
+    train_data_bagging,dev_data_bagging = bagging_split_data(train_data)
     weight_name = 'models/bagging_{}.weights'.format(i)
     test_result_path = 'output/bagging_result_test_{}.txt'.format(i)
     dev_result_path = 'output/bagging_result_dev_{}.json'.format(i)  # dev_result用来做数据分
     # dev_bio_result_path = 'output/result_dev_bio.json'  # dev_bio_result 用来观察抽取规则是否正确
-    train_D = data_generator(train_data_bagging, 32)
+    train_D = data_generator(train_data_bagging, event2id,32)
     for i in range(1,8):
         train_model.fit_generator(train_D.__iter__(),
                                   steps_per_epoch=len(train_D),

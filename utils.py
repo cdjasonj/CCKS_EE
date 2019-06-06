@@ -35,7 +35,7 @@ def encode(text):
     return tokenizer._convert_tokens_to_ids(tokens), [0] * len(tokens)
 
 
-def load_data(data,mode):
+def load_data(data,event2id,mode):
     """
     mode: dev ，同时还要返回bio
     mode: test , 只返回序列化文本
@@ -45,36 +45,41 @@ def load_data(data,mode):
     """
     if mode == 'dev':
         idxs = [i for i in range(len(data))]
-        BERT_INPUT0, BERT_INPUT1,BIO= [], [], []
+        BERT_INPUT0, BERT_INPUT1,BIO,EVENT= [],[], [], []
         for i in tqdm(idxs):
             d = data[i]
             text = d['text']
             or_text = text
             indices, segments = encode(or_text)
             entity = d['entity']
+            event = d['event_type']
             text = '^' + text + '^'
             bio = get_data_bio(text, entity)
             BERT_INPUT0.append(indices)
             BERT_INPUT1.append(segments)
+            EVENT.append([event2id.get(event, 0)])
             BIO.append(bio)
         BERT_INPUT0 = np.array(seq_padding(BERT_INPUT0))
         BERT_INPUT1 = np.array(seq_padding(BERT_INPUT1))
         BIO = np.array(seq_padding(BIO))
-        return BERT_INPUT0, BERT_INPUT1,BIO
+        EVENT = np.array(EVENT)
+        return BERT_INPUT0, BERT_INPUT1,BIO,EVENT
     else:
         idxs = [i for i in range(len(data))]
-        BERT_INPUT0, BERT_INPUT1= [], []
+        BERT_INPUT0, BERT_INPUT1,EVENT = [], [],[]
         for i in tqdm(idxs):
             d = data[i]
             text = d['text']
+            event = d['event_type']
             or_text = text
             indices, segments = encode(or_text)
             BERT_INPUT0.append(indices)
             BERT_INPUT1.append(segments)
+            EVENT.append([event2id.get(event, 0)])
         BERT_INPUT0 = np.array(seq_padding(BERT_INPUT0))
         BERT_INPUT1 = np.array(seq_padding(BERT_INPUT1))
-        return BERT_INPUT0, BERT_INPUT1
-
+        EVENT = np.array(EVENT)
+        return BERT_INPUT0, BERT_INPUT1,EVENT
 
 def get_data_bio(text,entity):
     """
@@ -95,8 +100,9 @@ def get_data_bio(text,entity):
 
 
 class data_generator:
-    def __init__(self, data, batch_size=64):
+    def __init__(self, data, event2id,batch_size=64):
         self.data = data
+        self.event2id = event2id
         self.batch_size = batch_size
         self.steps = len(self.data) // self.batch_size
         if len(self.data) % self.batch_size != 0:
@@ -131,21 +137,24 @@ class data_generator:
         while True:
             idxs = [i for i in range(len(self.data))]
             np.random.shuffle(idxs)
-            BERT_INPUT0, BERT_INPUT1,BIO = [],[],[]
+            BERT_INPUT0, BERT_INPUT1,BIO,EVENT = [],[],[],[]
             for i in idxs:
                 d = self.data[i]
                 text = d['text']
                 or_text = text
                 indices, segments = self.encode(or_text)
                 entity = d['entity']
+                event = d['event_type']
                 text = '^' + text + '^'
                 bio = get_data_bio(text, entity)
                 BERT_INPUT0.append(indices)
                 BERT_INPUT1.append(segments)
+                EVENT.append([self.event2id.get(event,0)])
                 BIO.append(bio)
                 if len(BERT_INPUT1) == self.batch_size or i == idxs[-1]:
                     BERT_INPUT0 = np.array(seq_padding(BERT_INPUT0))
                     BERT_INPUT1 = np.array(seq_padding(BERT_INPUT1))
                     BIO = np.array(seq_padding(BIO))
-                    yield [BERT_INPUT0, BERT_INPUT1,BIO], None
-                    BERT_INPUT0, BERT_INPUT1,BIO= [],[],[]
+                    EVENT = np.array(EVENT)
+                    yield [BERT_INPUT0, BERT_INPUT1,BIO,EVENT], None
+                    BERT_INPUT0, BERT_INPUT1,BIO,EVENT= [],[],[],[]

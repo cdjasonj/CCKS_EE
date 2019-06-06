@@ -83,6 +83,20 @@ def split_dev(train_data):
 
     return new_train_data,dev_data
 
+def bagging_split_data(train_data):
+    #完全随机，增加差异性
+    train_data_bagging = []
+    dev_data_bagging = []
+    ids = [data['id'] for data in train_data]
+    train_data_ids = sample(ids,round(len(ids)*0.8))
+
+    for data in train_data:
+        if data['id'] in train_data_ids:
+            train_data_bagging.append(data)
+        else:
+            dev_data_bagging.append(data)
+    return train_data_bagging,dev_data_bagging
+
 test_data_train,test_data_no_train = split_test_data(test_data)
 train_data = clean_train_data(train_data)
 train_data,dev_data = split_dev(train_data)
