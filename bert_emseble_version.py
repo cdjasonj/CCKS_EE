@@ -65,7 +65,7 @@ train_data_me = []
 train_data.apply(train_trans_data,axis=1)
 train_data = train_data_me
 
-debug = True
+debug = False
 
 if debug==True:
     train_data = train_data[:2000]

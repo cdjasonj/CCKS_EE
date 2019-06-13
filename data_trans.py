@@ -53,3 +53,14 @@ event2id = {i:j for i,j in enumerate(event_types)}
 
 with codecs.open('inputs/event2id.json','w',encoding='utf-8') as f:
     json.dump(event2id,f,indent=4,ensure_ascii=False)
+
+
+#将ID抽取出来当成ID
+ids = {}
+for data in train_data_me:
+    ids[data['id']] = ids.get(data['id'],0)+1
+ids2id = {i:j for i,j in enumerate(chars)} #padding:0,UNK1
+id2ids = {j:i for i,j in id2char.items()}
+
+with codecs.open('inputs/ids2id.json','w',encoding='utf-8') as f:
+    json.dump([id2ids, ids2id],f,indent=4,ensure_ascii=False)

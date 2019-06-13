@@ -18,6 +18,7 @@ from tqdm import tqdm
 from layers import Gate_Add_Lyaer,MaskedConv1D,MaskFlatten,MaskPermute,MaskRepeatVector,seq_and_vec
 from utils import load_data,data_generator
 from split_dev_data import clean_train_data,split_dev,bagging_split_data
+from sklearn.model_selection import KFold
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 #bert path
@@ -30,9 +31,7 @@ dict_path = '/home/ccit/tkhoon/baiduie/sujianlin/myself_model/bert/chinese_L-12_
 # dev_data_path = 'inputs/dev_data_me.json'
 test_data_path = 'inputs/test_data_me_train.json'
 test_data_no_train_path = 'inputs/test_data_me_no_train.json'
-aug0 = 'inputs/train_data_complex_aug0.json'
-aug1 = 'inputs/train_data_complex_aug1.json'
-aug2 = 'inputs/train_data_complex_aug2.json'
+
 
 event2id_path ='inputs/event2id.json'
 char2id_path = 'inputs/all_chars_me.json'
@@ -46,10 +45,6 @@ train_data = pd.read_csv('inputs/event_type_entity_extract_train.csv',header=Non
 # dev_data = json.load(open(dev_data_path,encoding='utf-8'))
 test_data = json.load(open(test_data_path,encoding='utf-8'))
 test_data_no_train = json.load(open(test_data_no_train_path,encoding='utf-8'))
-
-aug0 = json.load(open(aug0,encoding='utf-8'))
-aug1 = json.load(open(aug1,encoding='utf-8'))
-aug2 = json.load(open(aug2,encoding='utf-8'))
 
 def train_trans_data(item):
     dic = {}
@@ -70,9 +65,6 @@ char_size = 128
 train_data_me = []
 train_data.apply(train_trans_data,axis=1)
 train_data = train_data_me
-train_data += aug0
-train_data += aug1
-train_data += aug2
 
 debug = False
 
@@ -116,7 +108,9 @@ def build_model_from_config(config_file,
     event = Input(shape=(1,))
 
     mask = Lambda(lambda x: K.cast(K.greater(K.expand_dims(x, 2), 0), 'float32'))(inputs[0])
-    event_embedding = Embedding(len(event2id),hidden_size,mask_zero=True)(event)
+    event_embedding = Embedding(len(event2id),config['hidden_size'],mask_zero=True)(event)
+    event_bc = Lambda(lambda input: input[0] * 0 + input[1])([outputs, event_embedding])
+    outputs = Add()([outputs,event_bc])
 
     outputs = Dropout(0.15)(outputs)
     attention = TimeDistributed(Dense(1, activation='tanh'))(outputs)
@@ -130,11 +124,8 @@ def build_model_from_config(config_file,
     bert_attention = Lambda(seq_and_vec, output_shape=(None, t_dim * 2))([outputs,attention])
 
     cnn1 = MaskedConv1D(filters=hidden_size, kernel_size=3, activation='relu', padding='same')(bert_attention)
-    event_bc = Lambda(lambda input: input[0] * 0 + input[1])([cnn1, event_embedding])
-    con_cnn_event = Concatenate(axis=-1)([cnn1,event_bc])
-    dens1 = Dense(hidden_size,activation='relu',use_bias=True)(con_cnn_event)
     #BIOE
-    bio_pred = Dense(4, activation='softmax')(dens1)
+    bio_pred = Dense(4, activation='softmax')(cnn1)
     entity_model = keras.models.Model([inputs[0], inputs[1],event], [bio_pred])  # 预测subject的模型
     train_model = keras.models.Model([inputs[0], inputs[1],bio_label,event],[bio_pred])
 
@@ -290,23 +281,28 @@ for i in range(10):
     train_model, entity_model = build_model_from_config(config_path, checkpoint_path, seq_len=180)
     best_f1 = 0
     print('当前是第{}个bagging'.format(i))
-    train_data_bagging,dev_data_bagging = bagging_split_data(train_data)
-    weight_name = 'models/bagging_{}.weights'.format(i)
-    test_result_path = 'output/bagging_result_test_{}.txt'.format(i)
-    dev_result_path = 'output/bagging_result_dev_{}.json'.format(i)  # dev_result用来做数据分
-    # dev_bio_result_path = 'output/result_dev_bio.json'  # dev_bio_result 用来观察抽取规则是否正确
-    train_D = data_generator(train_data_bagging, event2id,32)
-    for i in range(1,8):
-        train_model.fit_generator(train_D.__iter__(),
-                                  steps_per_epoch=len(train_D),
-                                  epochs=1,
-                                  )
-        # if (i) % 2 == 0 : #两次对dev进行一次测评,并对dev结果进行保存
-        print('进入到这里了哟~')
-        P, R, F = predict_test_batch('dev')
-        if F > best_f1 :
-            best_f1 = F
-            train_model.save_weights(weight_name)
-            print('当前第{}个epoch，准确度为{},召回为{},f1为：{}'.format(i,P,R,F))
-    predict_test_batch('test')
-    K.clear_session()
+    splits = list(KFold(n_splits=5, shuffle=True, random_state=2018).split(train_data))
+    # train_data_bagging,dev_data_bagging = bagging_split_data(train_data)
+    for idx, (train_idx, valid_idx) in enumerate(splits):
+        i  = idx
+        weight_name = 'models/bagging_{}.weights'.format(i)
+        test_result_path = 'output/bagging_result_test_{}.txt'.format(i)
+        dev_result_path = 'output/bagging_result_dev_{}.json'.format(i)  # dev_result用来做数据分
+        train_data_bagging = train_data[train_idx]
+        dev_data_bagging = train_data[valid_idx]
+        # dev_data_bagging
+        train_D = data_generator(train_data_bagging, event2id,32)
+        for i in range(1,8):
+            train_model.fit_generator(train_D.__iter__(),
+                                      steps_per_epoch=len(train_D),
+                                      epochs=1,
+                                      )
+            # if (i) % 2 == 0 : #两次对dev进行一次测评,并对dev结果进行保存
+            print('进入到这里了哟~')
+            P, R, F = predict_test_batch('dev')
+            if F > best_f1 :
+                best_f1 = F
+                train_model.save_weights(weight_name)
+                print('当前第{}个epoch，准确度为{},召回为{},f1为：{}'.format(i,P,R,F))
+        predict_test_batch('test')
+        K.clear_session()

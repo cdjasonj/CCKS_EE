@@ -89,10 +89,11 @@ def process_data(result_a):
             for relu_data in test_dic_ds:
                 if int(relu_data['id']) == id:
                     if  (data['entity'] in relu_data['entity']) and (len(data['entity']) < len(relu_data['entity'])):
-                        # print(data['entity'])
-                        # print(relu_data['entity'])
+                        print(data['entity'])
+                        print(relu_data['entity'])
+                        print(data['id'])
                         data['entity'] = relu_data['entity']
-                        # print(' ')
+                        print(' ')
                         count_+=1
     print('一共修复了{}条'.format(count_))
 
